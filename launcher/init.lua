@@ -78,10 +78,8 @@ local selected_index = 1
 local filtered_apps = {}
 local all_apps = {}
 
--- Item widgets by index and the preview wrapper, for set_selected() below.
-local item_widgets = {}
-local preview_margin
-local set_selected -- assigned after create_forge_preview is defined
+-- Forward declaration; assigned once restyle_selection/update_preview exist.
+local set_selected
 
 -- Configuration
 local config = {
@@ -451,53 +449,60 @@ local function get_icon_widget(path, size)
   return cached
 end
 
---- Create an app item widget
-local function create_app_item(app, index)
-  local is_selected = index == selected_index
-
-  local icon_widget
-  if app.icon then
-    icon_widget = get_icon_widget(app.icon, config.icon_size)
-  else
-    -- Fallback: styled initial (first letter of app name)
-    local initial = app.name:sub(1, 1):upper()
-    local bg_color = get_initial_color(app.name)
-
-    icon_widget = wibox.widget({
-      {
-        {
-          text = initial,
-          font = beautiful.font_size(18, "Bold"),
-          halign = "center",
-          valign = "center",
-          widget = wibox.widget.textbox,
-        },
-        fg = beautiful.bg_normal, -- Dark text on colored background
-        widget = wibox.container.background,
-      },
-      bg = bg_color,
-      shape = gears.shape.rectangle,
-      forced_width = config.icon_size,
-      forced_height = config.icon_size,
-      widget = wibox.container.background,
-    })
+-- Caches the colored-initial fallback icon (list size only), keyed by app
+-- name since the initial/color are pure functions of it. Safe to share the
+-- same instance across renders: only one slot ever shows a given app at a
+-- time, so it's never parented in two places at once.
+local fallback_icon_cache = {}
+local function get_fallback_icon_widget(name)
+  local cached = fallback_icon_cache[name]
+  if cached then
+    return cached
   end
 
-  local item = wibox.widget({
+  local initial = name:sub(1, 1):upper()
+  local bg_color = get_initial_color(name)
+
+  cached = wibox.widget({
     {
       {
-        icon_widget,
+        text = initial,
+        font = beautiful.font_size(18, "Bold"),
+        halign = "center",
+        valign = "center",
+        widget = wibox.widget.textbox,
+      },
+      fg = beautiful.bg_normal, -- Dark text on colored background
+      widget = wibox.container.background,
+    },
+    bg = bg_color,
+    shape = gears.shape.rectangle,
+    forced_width = config.icon_size,
+    forced_height = config.icon_size,
+    widget = wibox.container.background,
+  })
+  fallback_icon_cache[name] = cached
+  return cached
+end
+
+local MAX_SLOTS = config.max_results
+
+--- Build one reusable result-row widget. Typing/filtering never rebuilds
+--- these; it only changes which app slot[index] shows, via render_results()
+--- below. The click handler reads filtered_apps[index] at click time (not
+--- at build time), since the same slot shows different apps over time.
+local function create_slot(index)
+  local icon_slot = wibox.widget({ widget = wibox.container.background })
+  local name_text = wibox.widget({ font = beautiful.font_size(12), widget = wibox.widget.textbox })
+  local sub_text = wibox.widget({ font = beautiful.font_size(10), widget = wibox.widget.textbox })
+
+  local root = wibox.widget({
+    {
+      {
+        icon_slot,
         {
-          {
-            text = app.name,
-            font = beautiful.font_size(12),
-            widget = wibox.widget.textbox,
-          },
-          {
-            text = app.comment ~= "" and app.comment or app.exec:match("^%S+"),
-            font = beautiful.font_size(10),
-            widget = wibox.widget.textbox,
-          },
+          name_text,
+          sub_text,
           spacing = 2,
           layout = wibox.layout.fixed.vertical,
         },
@@ -507,107 +512,78 @@ local function create_app_item(app, index)
       margins = 8,
       widget = wibox.container.margin,
     },
-    bg = is_selected and beautiful.primary_color or "transparent",
-    fg = is_selected and beautiful.bg_normal or beautiful.fg_normal,
+    bg = "transparent",
+    fg = beautiful.fg_normal,
     shape = beautiful.shape_small,
     forced_height = config.item_height,
     widget = wibox.container.background,
   })
 
-  item_widgets[index] = item
-
-  -- Click to launch
-  item:add_button(awful.button({}, 1, function()
+  root:add_button(awful.button({}, 1, function()
+    local app = filtered_apps[index]
+    if not app then
+      return
+    end
     log("Click on: " .. app.name .. " -> " .. app.exec .. "")
     launcher.hide()
     awful.spawn(app.exec)
   end))
 
-  -- Hover
-  item:connect_signal("mouse::enter", function()
-    set_selected(index)
+  root:connect_signal("mouse::enter", function()
+    if filtered_apps[index] then
+      set_selected(index)
+    end
   end)
 
-  return item
+  return {
+    root = root,
+    icon_slot = icon_slot,
+    name_text = name_text,
+    sub_text = sub_text,
+  }
 end
 
---- Create the search input widget
-local function create_search_input()
-  return wibox.widget({
-    {
-      {
-        {
-          text = "",
-          font = beautiful.font_size(18),
-          widget = wibox.widget.textbox,
-        },
-        fg = beautiful.primary_color,
-        widget = wibox.container.background,
-      },
-      {
-        id = "search_text",
-        text = search_text == "" and "Search applications..." or search_text,
-        font = beautiful.font_size(14),
-        widget = wibox.widget.textbox,
-      },
-      spacing = 12,
-      layout = wibox.layout.fixed.horizontal,
-    },
-    {
-      {
-        orientation = "horizontal",
-        forced_height = 2,
-        color = beautiful.primary_color,
-        widget = wibox.widget.separator,
-      },
-      top = 8,
-      widget = wibox.container.margin,
-    },
-    layout = wibox.layout.fixed.vertical,
-  })
+local slots = {}
+for i = 1, MAX_SLOTS do
+  slots[i] = create_slot(i)
 end
 
---- Create the results list widget
-local function create_results_list()
-  item_widgets = {}
+--- Search input, built once; refresh() below updates search_text_widget.text
+--- in place instead of rebuilding this.
+local search_text_widget = wibox.widget({
+  id = "search_text",
+  text = "Search applications...",
+  font = beautiful.font_size(14),
+  widget = wibox.widget.textbox,
+})
 
-  if #filtered_apps == 0 then
-    return wibox.widget({
+local search_input_widget = wibox.widget({
+  {
+    {
       {
-        text = apps_loading and "Loading applications..." or "No applications found",
-        font = beautiful.font_size(12),
-        halign = "center",
+        text = "",
+        font = beautiful.font_size(18),
         widget = wibox.widget.textbox,
       },
-      fg = beautiful.fg_normal .. "88",
+      fg = beautiful.primary_color,
       widget = wibox.container.background,
-    })
-  end
-
-  local layout = wibox.layout.fixed.vertical()
-  layout.spacing = 4
-
-  for i, app in ipairs(filtered_apps) do
-    layout:add(create_app_item(app, i))
-  end
-
-  -- Wrap in a container to capture scroll events
-  local container = wibox.widget({
-    layout,
-    widget = wibox.container.background,
-  })
-
-  container:add_button(awful.button({}, 4, function()
-    -- Scroll up
-    set_selected(math.max(1, selected_index - 1))
-  end))
-  container:add_button(awful.button({}, 5, function()
-    -- Scroll down
-    set_selected(math.min(#filtered_apps, selected_index + 1))
-  end))
-
-  return container
-end
+    },
+    search_text_widget,
+    spacing = 12,
+    layout = wibox.layout.fixed.horizontal,
+  },
+  {
+    {
+      orientation = "horizontal",
+      forced_height = 2,
+      color = beautiful.primary_color,
+      widget = wibox.widget.separator,
+    },
+    top = 8,
+    widget = wibox.container.margin,
+  },
+  layout = wibox.layout.fixed.vertical,
+})
 
 -- Preview panel widgets, built once; update_preview() mutates them in place.
 local preview_icon_container = wibox.widget({
@@ -660,30 +636,98 @@ local function create_forge_preview()
   return preview_root
 end
 
--- Moves the highlight in place; refresh() re-filters and rebuilds the whole popup.
-set_selected = function(new_index)
-  if new_index == selected_index or #filtered_apps == 0 then
-    return
+--- Results list, built once from the fixed slot pool above, plus a status
+--- message shown when there's nothing to show.
+local results_empty_message = wibox.widget({
+  text = "No applications found",
+  font = beautiful.font_size(12),
+  halign = "center",
+  widget = wibox.widget.textbox,
+})
+local results_empty_wrap = wibox.widget({
+  results_empty_message,
+  fg = beautiful.fg_normal .. "88",
+  widget = wibox.container.background,
+})
+
+local results_items_layout = wibox.layout.fixed.vertical()
+results_items_layout.spacing = 4
+for i = 1, MAX_SLOTS do
+  results_items_layout:add(slots[i].root)
+end
+
+-- Wrap in a container to capture scroll events; .widget below toggles
+-- between the item list and the empty/loading message.
+local results_root = wibox.widget({ results_items_layout, widget = wibox.container.background })
+
+results_root:add_button(awful.button({}, 4, function()
+  -- Scroll up
+  set_selected(math.max(1, selected_index - 1))
+end))
+results_root:add_button(awful.button({}, 5, function()
+  -- Scroll down
+  set_selected(math.min(#filtered_apps, selected_index + 1))
+end))
+
+--- Restyles every slot to match selected_index. Called on every render, not
+--- just when selected_index changes, since a re-filter can leave the index
+--- unchanged while the app it points at changes underneath it.
+local function restyle_selection()
+  for i = 1, MAX_SLOTS do
+    local slot = slots[i]
+    if i == selected_index and filtered_apps[i] then
+      slot.root.bg = beautiful.primary_color
+      slot.root.fg = beautiful.bg_normal
+    else
+      slot.root.bg = "transparent"
+      slot.root.fg = beautiful.fg_normal
+    end
+  end
+end
+
+--- Re-renders the result list & preview from the current filtered_apps /
+--- selected_index, in place. Never rebuilds widgets -- only text, images,
+--- and visibility change. This is what typing calls now, instead of
+--- rebuilding the whole popup on every keystroke.
+local function render_results()
+  for i = 1, MAX_SLOTS do
+    local slot = slots[i]
+    local app = filtered_apps[i]
+    if app then
+      slot.icon_slot.widget = app.icon and get_icon_widget(app.icon, config.icon_size) or get_fallback_icon_widget(app.name)
+      slot.name_text.text = app.name
+      slot.sub_text.text = app.comment ~= "" and app.comment or app.exec:match("^%S+")
+      slot.root.visible = true
+    else
+      slot.root.visible = false
+    end
   end
 
-  local old_item = item_widgets[selected_index]
-  if old_item then
-    old_item.bg = "transparent"
-    old_item.fg = beautiful.fg_normal
+  if #filtered_apps == 0 then
+    results_empty_message.text = apps_loading and "Loading applications..." or "No applications found"
+    results_root.widget = results_empty_wrap
+  else
+    results_root.widget = results_items_layout
   end
 
-  selected_index = new_index
-
-  local new_item = item_widgets[selected_index]
-  if new_item then
-    new_item.bg = beautiful.primary_color
-    new_item.fg = beautiful.bg_normal
-  end
-
+  restyle_selection()
   update_preview()
 end
 
---- Create the main launcher widget
+-- Moves the highlight in place (hover/arrow/scroll); typing goes through
+-- render_results() above instead.
+set_selected = function(new_index)
+  if new_index == selected_index or not filtered_apps[new_index] then
+    return
+  end
+  selected_index = new_index
+  restyle_selection()
+  update_preview()
+end
+
+--- Create the main launcher widget. Called exactly once (from build_popup);
+--- everything after that is content mutation via render_results()/
+--- set_selected(), not a rebuild.
 local function create_launcher_widget()
   local widget_start = os.clock()
 
@@ -693,7 +737,7 @@ local function create_launcher_widget()
     + 16 -- spacing
     + (config.item_height + 4) * config.max_results -- items + spacing
 
-  preview_margin = wibox.widget({
+  local preview_margin = wibox.widget({
     create_forge_preview(),
     left = 18,
     widget = wibox.container.margin,
@@ -702,10 +746,10 @@ local function create_launcher_widget()
   local widget = wibox.widget({
     {
       {
-        create_search_input(),
+        search_input_widget,
         {
           {
-            create_results_list(),
+            results_root,
             forced_width = 430,
             widget = wibox.container.constraint,
           },
@@ -776,9 +820,10 @@ local controller = modal.new({
     search_text = ""
     selected_index = 1
     filter_apps()
+    search_text_widget.text = "Search applications..."
+    render_results()
 
     awful.placement.centered(popup, { parent = popup.screen })
-    popup.widget = create_launcher_widget()
   end,
   keypressed = function(_, key)
     if key == "Return" then
@@ -807,8 +852,11 @@ local controller = modal.new({
 --- Refresh the launcher display
 function launcher.refresh()
   if controller.popup then
+    local filter_start = os.clock()
     filter_apps()
-    controller.popup.widget = create_launcher_widget()
+    log_time("  filter_apps()", filter_start)
+    search_text_widget.text = search_text == "" and "Search applications..." or search_text
+    render_results()
   end
 end
 
