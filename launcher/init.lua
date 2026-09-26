@@ -78,9 +78,14 @@ local selected_index = 1
 local filtered_apps = {}
 local all_apps = {}
 
+-- Item widgets by index and the preview wrapper, for set_selected() below.
+local item_widgets = {}
+local preview_margin
+local set_selected -- assigned after create_forge_preview is defined
+
 -- Configuration
 local config = {
-  width = 500,
+  width = 820,
   max_results = 8,
   icon_size = 40,
   item_height = 50,
@@ -428,19 +433,31 @@ local function get_initial_color(name)
   return initial_colors[(sum % #initial_colors) + 1]
 end
 
+-- Caches the built imagebox wrapper (gears.surface already caches the decoded file); keyed by path+size since the preview wants a bigger copy.
+local icon_widget_cache = {}
+local function get_icon_widget(path, size)
+  local key = path .. "@" .. size
+  local cached = icon_widget_cache[key]
+  if not cached then
+    cached = wibox.widget({
+      image = path,
+      resize = true,
+      forced_width = size,
+      forced_height = size,
+      widget = wibox.widget.imagebox,
+    })
+    icon_widget_cache[key] = cached
+  end
+  return cached
+end
+
 --- Create an app item widget
 local function create_app_item(app, index)
   local is_selected = index == selected_index
 
   local icon_widget
   if app.icon then
-    icon_widget = wibox.widget({
-      image = app.icon,
-      resize = true,
-      forced_width = config.icon_size,
-      forced_height = config.icon_size,
-      widget = wibox.widget.imagebox,
-    })
+    icon_widget = get_icon_widget(app.icon, config.icon_size)
   else
     -- Fallback: styled initial (first letter of app name)
     local initial = app.name:sub(1, 1):upper()
@@ -497,6 +514,8 @@ local function create_app_item(app, index)
     widget = wibox.container.background,
   })
 
+  item_widgets[index] = item
+
   -- Click to launch
   item:add_button(awful.button({}, 1, function()
     log("Click on: " .. app.name .. " -> " .. app.exec .. "")
@@ -506,11 +525,7 @@ local function create_app_item(app, index)
 
   -- Hover
   item:connect_signal("mouse::enter", function()
-    if selected_index == index then
-      return
-    end
-    selected_index = index
-    launcher.refresh()
+    set_selected(index)
   end)
 
   return item
@@ -554,6 +569,8 @@ end
 
 --- Create the results list widget
 local function create_results_list()
+  item_widgets = {}
+
   if #filtered_apps == 0 then
     return wibox.widget({
       {
@@ -582,16 +599,88 @@ local function create_results_list()
 
   container:add_button(awful.button({}, 4, function()
     -- Scroll up
-    selected_index = math.max(1, selected_index - 1)
-    launcher.refresh()
+    set_selected(math.max(1, selected_index - 1))
   end))
   container:add_button(awful.button({}, 5, function()
     -- Scroll down
-    selected_index = math.min(#filtered_apps, selected_index + 1)
-    launcher.refresh()
+    set_selected(math.min(#filtered_apps, selected_index + 1))
   end))
 
   return container
+end
+
+-- Preview panel widgets, built once; update_preview() mutates them in place.
+local preview_icon_container = wibox.widget({
+  wibox.widget({ widget = wibox.widget.textbox }),
+  widget = wibox.container.background,
+})
+local preview_name = wibox.widget({ font = beautiful.font_size(16, "Bold"), widget = wibox.widget.textbox })
+local preview_comment = wibox.widget({ widget = wibox.widget.textbox })
+local preview_open = wibox.widget({
+  text = "  OPEN  ", align = "center",
+  bg = beautiful.primary_color, fg = beautiful.bg_normal,
+  widget = wibox.container.background,
+})
+preview_open:add_button(awful.button({}, 1, function()
+  local app = filtered_apps[selected_index]
+  if app then
+    launcher.hide()
+    awful.spawn(app.exec)
+  end
+end))
+local preview_content = wibox.widget({
+  preview_icon_container,
+  preview_name,
+  preview_comment,
+  preview_open,
+  spacing = 14,
+  layout = wibox.layout.fixed.vertical,
+})
+local preview_empty = wibox.widget({
+  text = "Select an application", valign = "center", align = "center", widget = wibox.widget.textbox,
+})
+local preview_root = wibox.widget({ preview_empty, widget = wibox.container.background })
+
+-- Updates the existing preview widgets instead of rebuilding them.
+local function update_preview()
+  local app = filtered_apps[selected_index]
+  if not app then
+    preview_root.widget = preview_empty
+    return
+  end
+  preview_icon_container.widget = app.icon and get_icon_widget(app.icon, 64)
+    or wibox.widget({ text = app.name:sub(1, 1):upper(), font = beautiful.font_size(32, "Bold"), widget = wibox.widget.textbox })
+  preview_name.text = app.name
+  preview_comment.text = app.comment or ""
+  preview_root.widget = preview_content
+end
+
+local function create_forge_preview()
+  update_preview()
+  return preview_root
+end
+
+-- Moves the highlight in place; refresh() re-filters and rebuilds the whole popup.
+set_selected = function(new_index)
+  if new_index == selected_index or #filtered_apps == 0 then
+    return
+  end
+
+  local old_item = item_widgets[selected_index]
+  if old_item then
+    old_item.bg = "transparent"
+    old_item.fg = beautiful.fg_normal
+  end
+
+  selected_index = new_index
+
+  local new_item = item_widgets[selected_index]
+  if new_item then
+    new_item.bg = beautiful.primary_color
+    new_item.fg = beautiful.bg_normal
+  end
+
+  update_preview()
 end
 
 --- Create the main launcher widget
@@ -604,14 +693,25 @@ local function create_launcher_widget()
     + 16 -- spacing
     + (config.item_height + 4) * config.max_results -- items + spacing
 
+  preview_margin = wibox.widget({
+    create_forge_preview(),
+    left = 18,
+    widget = wibox.container.margin,
+  })
+
   local widget = wibox.widget({
     {
       {
         create_search_input(),
         {
-          create_results_list(),
+          {
+            create_results_list(),
+            forced_width = 430,
+            widget = wibox.container.constraint,
+          },
+          preview_margin,
           top = 16,
-          widget = wibox.container.margin,
+          layout = wibox.layout.fixed.horizontal,
         },
         layout = wibox.layout.fixed.vertical,
       },
@@ -684,11 +784,9 @@ local controller = modal.new({
     if key == "Return" then
       launch_selected()
     elseif key == "Up" then
-      selected_index = math.max(1, selected_index - 1)
-      launcher.refresh()
+      set_selected(math.max(1, selected_index - 1))
     elseif key == "Down" then
-      selected_index = math.min(#filtered_apps, selected_index + 1)
-      launcher.refresh()
+      set_selected(math.min(#filtered_apps, selected_index + 1))
     elseif key == "BackSpace" then
       search_text = search_text:sub(1, -2)
       launcher.refresh()
