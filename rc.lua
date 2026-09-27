@@ -17,6 +17,8 @@ pcall(require, "luarocks.loader")
 -- @DOC_REQUIRE_SECTION@
 -- Standard awesome library
 local awful = require("awful")
+awful.input.tap_to_click = 1
+awful.input.natural_scrolling = 1
 require("awful.autofocus")
 -- Widget and layout library
 local wibox = require("wibox")
@@ -72,12 +74,18 @@ try("lockscreen", function()
   require("lockscreen").init()
 end)
 
+-- Session: post-compositor D-Bus/systemd activation environment handoff.
+try("session", function()
+  require("session").init()
+  require("session").setup_idle()
+end)
+
 -- @DOC_DEFAULT_APPLICATIONS@
 -- This is used later as the default terminal and editor to run.
-terminal = "ghostty"
-editor = os.getenv("EDITOR") or "nvim"
-editor_cmd = "ghostty -e " .. editor
-filemanager = "thunar" --While I'm in here, may as well make this a variable
+terminal = "kitty"
+editor = "code"
+editor_cmd = "kitty -e " .. editor
+filemanager = "thunar"
 
 -- Default modkey.
 -- Usually, Mod4 is the key with a logo between Control and Alt.
@@ -89,12 +97,17 @@ modkey = "Mod4"
 -- The workspaces, defined once. Each tag carries the icon the taglist renders
 -- for it (files in icons/); the demo rules further down route apps to tags by
 -- these names, so rename in both places or a rule will quietly stop matching.
+-- `layout` picks this tag's *initial* layout by index into the
+-- `awful.layout.append_default_layouts` list below (1 = tile, 2 = floating,
+-- 10 = max). Mod+Space still cycles through all of them from there; this
+-- just stops FILES/MEDIA/GAME from opening into a tiling split when a single
+-- maximized/floating window is what actually gets used on them.
 local tags = {
-  { name = "code", icon = "terminal.svg" },
-  { name = "web", icon = "chrome.svg" },
-  { name = "chat", icon = "slack.svg" },
-  { name = "db", icon = "server.svg" },
-  { name = "games", icon = "play.svg" },
+  { name = "01 CODE", icon = "terminal.svg", layout = 1 },
+  { name = "02 WEB", icon = "chrome.svg", layout = 1 },
+  { name = "03 FILES", icon = "folder.svg", layout = 10 },
+  { name = "04 MEDIA", icon = "grid.svg", layout = 2 },
+  { name = "05 GAME", icon = "play.svg", layout = 10 },
 }
 -- }}}
 
@@ -132,8 +145,7 @@ end)
 -- One entry per screen, indexed by screen number. These paths are relative to this
 -- config so a fresh clone has something to show. Point them anywhere you like.
 local wallpapers = {
-  config_dir .. "wallpapers/penguin.jpg",
-  config_dir .. "wallpapers/spaceman.jpg",
+  "/home/cam/Pictures/forge.png",
 }
 
 local function set_wallpaper(s)
@@ -141,18 +153,21 @@ local function set_wallpaper(s)
   if wp and gears.filesystem.file_readable(wp) then
     awful.wallpaper({
       screen = s,
-      bg = "#282828",
       widget = {
-        image = wp,
-        upscale = true,
-        downscale = true,
-        halign = "center",
+        {
+          image = wp,
+          upscale = true,
+          downscale = true,
+          widget = wibox.widget.imagebox,
+        },
         valign = "center",
-        widget = wibox.widget.imagebox,
+        halign = "center",
+        tiled = false,
+        widget = wibox.container.tile,
       },
     })
   else
-    awful.wallpaper({ screen = s, bg = "#282828" })
+    awful.wallpaper({ screen = s, bg = "#101317" })
   end
 end
 
@@ -186,7 +201,7 @@ screen.connect_signal("request::desktop_decoration", function(s)
   for i, t in ipairs(tags) do
     awful.tag.add(t.name, {
       screen = s,
-      layout = awful.layout.layouts[1],
+      layout = awful.layout.layouts[t.layout or 1],
       selected = i == 1,
       icon_name = t.icon,
     })
@@ -216,6 +231,7 @@ screen.connect_signal("request::desktop_decoration", function(s)
   })
 
   s.mywibox = wibar(s)
+  s.forge_dock = require("forge_dock")(s)
 end)
 
 -- {{{ Mouse bindings
@@ -247,10 +263,12 @@ ruled.client.connect_signal("request::rules", function()
       placement = awful.placement.no_overlap + awful.placement.no_offscreen,
     },
     callback = function(c)
-      c:grant("autoactivate", "switch_tag")
-      c:grant("autoactivate", "history")
-      c:deny("autoactivate", "mouse_enter")
-      c:to_secondary_section()
+      if c.grant then
+        c:grant("autoactivate", "switch_tag")
+        c:grant("autoactivate", "history")
+      end
+      if c.deny then c:deny("autoactivate", "mouse_enter") end
+      if c.to_secondary_section then c:to_secondary_section() end
     end,
   })
 
@@ -304,16 +322,7 @@ ruled.client.connect_signal("request::rules", function()
     rule_any = {
       class = { "firefox", "Firefox", "chromium", "Chromium", "Google-chrome" },
     },
-    properties = { tag = "web" },
-  })
-
-  -- Tag assignment: Chat/communication apps on "chat" tag
-  ruled.client.append_rule({
-    id = "chat",
-    rule_any = {
-      class = { "discord", "Discord", "Slack", "TelegramDesktop", "Signal" },
-    },
-    properties = { tag = "chat" },
+    properties = { tag = "02 WEB", switch_to_tags = true },
   })
 
   -- Picture-in-Picture: Always floating, ontop, sticky, positioned top-right
@@ -336,6 +345,17 @@ ruled.client.connect_signal("request::rules", function()
     end,
   })
 
+  ruled.client.append_rule({
+    id = "forge-files",
+    rule_any = { class = { "Thunar", "org.gnome.Nautilus" } },
+    properties = { tag = "03 FILES", switch_to_tags = true },
+  })
+  ruled.client.append_rule({
+    id = "forge-media",
+    rule_any = { class = { "Spotify", "Lollypop", "Amberol" } },
+    properties = { tag = "04 MEDIA", switch_to_tags = true },
+  })
+
   -- File manager: Slightly larger default size
   ruled.client.append_rule({
     id = "filemanager",
@@ -352,7 +372,16 @@ ruled.client.connect_signal("request::rules", function()
   ruled.client.append_rule({
     id = "steam",
     rule = { class = "Steam" },
-    properties = { tag = "games" },
+    properties = { tag = "05 GAME", switch_to_tags = true },
+  })
+
+  -- mGBA is the one actually-installed game app right now (Steam isn't on
+  -- this machine) - route it here too instead of leaving GAME dead until
+  -- something else gets installed.
+  ruled.client.append_rule({
+    id = "mgba",
+    rule_any = { class = { "mgba", "mGBA" } },
+    properties = { tag = "05 GAME", switch_to_tags = true },
   })
 
   -- Steam friends list and chat: floating
@@ -399,10 +428,7 @@ client.connect_signal("request::titlebars", function(c)
 
   awful.titlebar(c).widget = {
     { -- Left
-      layout = wibox.layout.fixed.horizontal,
-      with_hover(awful.titlebar.widget.closebutton(c)),
-      with_hover(awful.titlebar.widget.floatingbutton(c)),
-      with_hover(awful.titlebar.widget.maximizedbutton(c)),
+      layout = wibox.layout.fixed.horizontal(),
     },
     { -- Middle
       { -- Title
@@ -414,6 +440,9 @@ client.connect_signal("request::titlebars", function(c)
     },
     { -- Right
       layout = wibox.layout.fixed.horizontal(),
+      with_hover(awful.titlebar.widget.floatingbutton(c)),
+      with_hover(awful.titlebar.widget.maximizedbutton(c)),
+      with_hover(awful.titlebar.widget.closebutton(c)),
     },
     layout = wibox.layout.align.horizontal,
   }

@@ -102,4 +102,8 @@ awesome.connect_signal("volume::update", function()
   update_volume()
 end)
 
+volume_widget:add_button(awful.button({}, 1, function()
+  require("dashboard").toggle()
+end))
+
 return volume_widget

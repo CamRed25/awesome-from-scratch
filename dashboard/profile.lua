@@ -91,7 +91,7 @@ function profile.create()
 
   -- Battery indicator (updated by the module-level battery timer)
   battery_icon = wibox.widget({
-    text = "󰁿",
+    text = "🔋",
     font = beautiful.font_size(14),
     widget = wibox.widget.textbox,
   })

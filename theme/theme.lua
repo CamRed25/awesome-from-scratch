@@ -79,21 +79,34 @@ local colors = {
     orange = "#D08770", -- aurora2 in palette
     soft_orange = "#D08770", -- aurora2 in palette
   },
+  forge = {
+    bg = "#101317", fg = "#d7d7d0",
+    grey1 = "#879195", grey2 = "#1b2025",
+    red = "#a86262", soft_red = "#c47777",
+    green = "#5c9b97", soft_green = "#7cafaa",
+    yellow = "#b18a5b", soft_yellow = "#c5a477",
+    blue = "#5c9b97", soft_blue = "#7cafaa",
+    soft_blue2 = "#8daeb0",
+    purple = "#8a819b", soft_purple = "#a399b1",
+    aqua = "#5c9b97",
+    white = "#d7d7d0", white2 = "#eeeeea",
+    orange = "#b18a5b", soft_orange = "#c5a477",
+  },
 }
 
-local color_scheme = "gruvbox"
+local color_scheme = "forge"
 local color = colors[color_scheme]
 
 -- One font family for the whole config. Widgets that need another size or
 -- weight build the string with beautiful.font_size() instead of repeating the
 -- family name, so changing the font means editing exactly one line.
-theme.font_family = "JetBrainsMono Nerd Font"
+theme.font_family = "JetBrains Mono"
 function theme.font_size(size, style)
   return theme.font_family .. " " .. (style and (style .. " ") or "") .. size
 end
 theme.font = theme.font_size(10)
-theme.primary_color = color.orange
-theme.primary_color_hover = color.soft_orange
+theme.primary_color = color.green
+theme.primary_color_hover = color.soft_green
 theme.active = color.green
 theme.active_hover = color.soft_green
 theme.accent = color.yellow
@@ -141,8 +154,8 @@ theme.fg_minimize = color.white
 
 theme.useless_gap = dpi(8)
 theme.border_width = dpi(1)
-theme.border_color_normal = color.bg
-theme.border_color_active = color.soft_orange
+theme.border_color_normal = "#313940"
+theme.border_color_active = color.green
 theme.border_color_marked = color.red
 
 -- There are other variable sets
@@ -833,7 +846,7 @@ theme.wibar_bg = color.bg
 -- theme.wibar_cursor = nil
 theme.wibar_favor_vertical = false
 theme.wibar_fg = color.fg
-theme.wibar_height = theme.useless_gap * 5
+theme.wibar_height = dpi(38)
 theme.wibar_margins = {
   top = theme.useless_gap * 2,
   left = theme.useless_gap * 2,
@@ -853,7 +866,7 @@ theme.wibar_shape = gears.shape.rectangle
 theme.widget_icon_margins = theme.wibar_height / 4 -- padding above/below an icon
 theme.widget_icon_spacing = dpi(4) -- gap between an icon and its own label
 theme.widget_spacing = dpi(10) -- gap between neighbouring widgets
-theme.widget_group_spacing = theme.wibar_height * 0.5 -- gap between groups in the bar
+theme.widget_group_spacing = dpi(18) -- gap between groups in the bar
 
 return theme
 

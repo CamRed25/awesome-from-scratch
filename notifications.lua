@@ -17,6 +17,12 @@ local modal = require("modal")
 -- Module table
 local M = {}
 
+-- Forward declaration: refreshes the embedded dashboard panel (defined
+-- further down, near M.create_panel). Declared this early so add_to_history
+-- below can call it too - a plain `local` further down would only be in
+-- scope for code textually after it.
+local refresh_panel
+
 -- Configuration
 M.config = {
   -- Default timeout for notifications (seconds)
@@ -116,6 +122,10 @@ local function add_to_history(notification)
       M.active_notifications[removed.id] = nil
     end
   end
+
+  -- Keep the embedded panel live while the dashboard is open (safe to call
+  -- any time - it's a no-op until M.create_panel has run at least once)
+  refresh_panel()
 end
 
 -- Helper function to play notification sound
@@ -195,7 +205,7 @@ local function build_picker_widget()
       {
         {
           {
-            text = "󰥔", -- nf-md-clock_outline
+            text = "⏰", -- no Nerd Font installed; plain Unicode renders via fontconfig fallback
             font = beautiful.font_size(12),
             forced_width = 20,
             widget = wibox.widget.textbox,
@@ -281,19 +291,22 @@ local function show_snooze_picker(notif_data)
   snooze_picker.show()
 end
 
--- Notification center configuration (following launcher/dashboard patterns)
+-- Notification panel configuration. This renders embedded in the dashboard
+-- now (see dashboard/init.lua) rather than as its own popup, so max_visible
+-- is small on purpose: the dashboard already has a tight height budget (see
+-- the overflow this config hit once already), and this panel shares it with
+-- everything else on the panel instead of owning the whole screen.
 local nc_config = {
-  width = 480,
-  max_visible = 15,
-  margin = 16,
+  max_visible = 2,
+  margin = 12,
   spacing = 8,
+  -- Sized to what's left in the dashboard's height budget after the two
+  -- columns above it (see dashboard/init.lua) - not a design preference.
+  panel_height = 100,
 }
 
 -- Notification center state
 local expanded_groups = {} -- Track which app groups are expanded (default: collapsed)
-
--- Forward declaration for refresh
-local refresh_popup
 
 -- Helper: Group notifications by app_name
 local function group_notifications_by_app()
@@ -388,7 +401,7 @@ local function create_group_header(group)
   -- Click to toggle expand/collapse
   header:add_button(awful.button({}, 1, function()
     expanded_groups[group.app_name] = not expanded_groups[group.app_name]
-    refresh_popup()
+    refresh_panel()
   end))
 
   -- Hover effect
@@ -418,7 +431,7 @@ local function create_notification_item(notif)
   local snooze_btn = wibox.widget({
     {
       {
-        text = "󰥔", -- nf-md-clock_outline
+        text = "⏰", -- no Nerd Font installed; plain Unicode renders via fontconfig fallback
         font = beautiful.font_size(14),
         halign = "center",
         valign = "center",
@@ -497,7 +510,7 @@ local function create_notification_item(notif)
       notif.is_read = true
       M.unread_count = math.max(0, M.unread_count - 1)
       awesome.emit_signal("notification::unread_count", M.unread_count)
-      refresh_popup()
+      refresh_panel()
     end
   end))
 
@@ -530,7 +543,7 @@ local function create_header()
     bg = beautiful.bg_minimize,
     fg = beautiful.fg_normal,
     shape = beautiful.shape_small or gears.shape.rounded_rect,
-    forced_width = 80,
+    forced_width = 90,
     forced_height = 26,
     widget = wibox.container.background,
   })
@@ -548,7 +561,7 @@ local function create_header()
     end
     M.history = new_history
     awesome.emit_signal("notification::unread_count", M.unread_count)
-    refresh_popup()
+    refresh_panel()
   end))
 
   -- Clear All button
@@ -565,7 +578,7 @@ local function create_header()
     bg = "#cc241d",
     fg = beautiful.fg_urgent,
     shape = beautiful.shape_small or gears.shape.rounded_rect,
-    forced_width = 80,
+    forced_width = 90,
     forced_height = 26,
     widget = wibox.container.background,
   })
@@ -575,7 +588,7 @@ local function create_header()
     M.unread_count = 0
     M.active_notifications = {}
     awesome.emit_signal("notification::unread_count", M.unread_count)
-    refresh_popup()
+    refresh_panel()
   end))
 
   return wibox.widget({
@@ -595,15 +608,15 @@ local function create_header()
   })
 end
 
--- Main widget creator
-local function create_popup_widget()
+-- Header + separator + notification list (or empty state). Rebuilt by
+-- refresh_panel() into the one child of the persistent container
+-- M.create_panel() hands to the dashboard.
+local function build_panel_content()
   local layout = wibox.layout.fixed.vertical()
   layout.spacing = nc_config.spacing
 
-  -- Header
   layout:add(create_header())
 
-  -- Separator
   layout:add(wibox.widget({
     orientation = "horizontal",
     forced_height = 1,
@@ -611,21 +624,13 @@ local function create_popup_widget()
     widget = wibox.widget.separator,
   }))
 
-  -- Notification list or empty state
   if #M.history == 0 then
     layout:add(wibox.widget({
-      {
-        {
-          text = "No notifications",
-          align = "center",
-          valign = "center",
-          widget = wibox.widget.textbox,
-        },
-        fg = beautiful.fg_normal .. "88",
-        widget = wibox.container.background,
-      },
-      forced_height = 100,
-      widget = wibox.container.constraint,
+      text = "No notifications",
+      align = "center",
+      valign = "center",
+      fg = beautiful.fg_normal .. "88",
+      widget = wibox.widget.textbox,
     }))
   else
     -- Group notifications by app
@@ -661,68 +666,42 @@ local function create_popup_widget()
     layout:add(list_layout)
   end
 
-  -- Wrap in margin and background
+  return layout
+end
+
+-- This used to be its own popup (its own placement, its own bg/border/
+-- margins); it now lives embedded at the bottom of the dashboard (see
+-- dashboard/init.lua), which supplies all of that. There is exactly one
+-- live instance, so refresh_panel() mutates its one child in place rather
+-- than handing back a new tree each time. The height cap is a hard limit,
+-- not just a small max_visible: the dashboard already overflowed its
+-- screen once from underestimating a section's height, and a clipped
+-- notification list is a much smaller problem than that happening again.
+local panel_container
+
+function M.create_panel()
+  panel_container = wibox.widget({
+    build_panel_content(),
+    layout = wibox.layout.fixed.vertical,
+  })
   return wibox.widget({
     {
-      layout,
+      panel_container,
       margins = nc_config.margin,
       widget = wibox.container.margin,
     },
-    bg = beautiful.bg_normal .. "F8",
-    shape = beautiful.shape or gears.shape.rounded_rect,
-    forced_width = nc_config.width,
-    widget = wibox.container.background,
+    height = nc_config.panel_height,
+    strategy = "max",
+    widget = wibox.container.constraint,
   })
 end
 
--- Show the notification center
--- The notification center opens centered under the click point (mouse coords
--- for multi-monitor reliability), tucked just below the bar. Same placement
--- shape as the snooze picker: one function, installed on the popup and called
--- from on_show.
-local center_anchor = { x = 0, y = 0 }
-
-local function place_center(d)
-  local wa = d.screen.workarea
-  d.x = center_anchor.x - d.width / 2
-  d.y = wa.y + (beautiful.useless_gap or 4)
-  awful.placement.no_offscreen(d, { honor_workarea = true, margins = beautiful.useless_gap or 4 })
-end
-
--- The notification center is a modal like the launcher and dashboard: the
--- controller owns visibility, Escape, click-outside/tag-change dismissal, and
--- the notification_center::visible signal.
-local center = modal.new({
-  name = "notification_center",
-  build_popup = function()
-    return awful.popup({
-      widget = create_popup_widget(),
-      screen = awful.screen.focused(),
-      ontop = true,
-      visible = false,
-      bg = "#00000000",
-      border_width = beautiful.border_width or 1,
-      border_color = beautiful.primary_color,
-      shape = beautiful.shape or gears.shape.rounded_rect,
-      placement = place_center,
-    })
-  end,
-  on_show = function(popup)
-    center_anchor = mouse.coords()
-    popup.widget = create_popup_widget()
-    place_center(popup)
-  end,
-})
-
-M.show_notification_center = center.show
-M.hide_notification_center = center.hide
-M.toggle_notification_center = center.toggle
-
--- Refresh popup content (safe to call any time; does nothing while hidden)
-refresh_popup = function()
-  if center.popup and center.is_visible() then
-    center.popup.widget = create_popup_widget()
+refresh_panel = function()
+  if not panel_container then
+    return
   end
+  panel_container:reset()
+  panel_container:add(build_panel_content())
 end
 
 -- Setup notification rules

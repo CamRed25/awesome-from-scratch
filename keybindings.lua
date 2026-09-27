@@ -8,7 +8,6 @@ require("awful.hotkeys_popup.keys")
 local dashboard = require("dashboard")
 local launcher = require("launcher")
 local exitscreen = require("exitscreen")
-local notifications = require("notifications")
 local mainmenu = require("widgets.mainmenu")
 local windowswitcher = require("widgets.windowswitcher")
 
@@ -96,6 +95,7 @@ local global_keys = {
   {{},         "XF86AudioNext",         function() awful.spawn("playerctl next") end,             "next track",                            "media"    },
   {{},         "XF86AudioPlay",         function() awful.spawn("playerctl play-pause") end,       "play/pause track",                      "media"    },
   {{},         "XF86AudioPrev",         function() awful.spawn("playerctl previous") end,         "previous track",                        "media"    },
+  {{},         "Print",                 function() awful.spawn.with_shell("set -o pipefail; grim - | wl-copy --type image/png") end, "copy screenshot to clipboard", "awesome"  },
   -- modkey only modifier
   {{ modkey }, "e",                     function () awful.spawn(filemanager) end,                 "open file browser",                     "launcher" },
   {{ modkey }, "h",                     function () awful.tag.incmwfact(-0.05) end,               "decrease master width factor",          "layout"   },
@@ -103,7 +103,8 @@ local global_keys = {
   {{ modkey }, "k",                     function () awful.client.focus.byidx(-1) end,             "focus previous by index",               "client"   },
   {{ modkey }, "l",                     function () awful.tag.incmwfact( 0.05) end,               "increase master width factor",          "layout"   },
   {{ modkey }, "d",                     function() dashboard.toggle() end,                        "toggle dashboard",                      "awesome"  },
-  {{ modkey, "Shift" }, "n",            function() notifications.toggle_notification_center() end, "toggle notifications",                  "awesome"  },
+  -- Notifications live in the dashboard now (its bottom panel), not their own popup
+  {{ modkey, "Shift" }, "n",            function() dashboard.toggle() end,                        "toggle notifications",                  "awesome"  },
   {{ modkey }, "p",                     function() launcher.toggle() end,                         "app launcher",                          "launcher" },
   {{ modkey }, "r",                     function () awful.screen.focused().mypromptbox:run() end, "run prompt",                            "launcher" },
   {{ modkey }, "s",                     hotkeys_popup.show_help,                                  "show help",                             "awesome"  },
@@ -122,7 +123,6 @@ local global_keys = {
   {{ modkey, "Control" }, "k",          function () awful.screen.focus_relative(-1) end,          "focus the previous screen",             "screen"   },
   {{ modkey, "Control" }, "l",          function () awful.tag.incncol(-1, nil, true) end,         "decrease the number of columns",        "layout"   },
   {{ modkey, "Control" }, "n",          global_helpers.client_restore_minimized,                  "restore minimized",                     "client"   },
-  {{ modkey, "Control" }, "p",          function() local s = awful.screenshot({ interactive = true }); s:connect_signal("snipping::start", function(self) if self._private.frame then self._private.imagebox.visible = false; self._private.frame.bg = "#00000040"; self._private.frame.surface_scale = 1.0 end end); s:refresh() end, "take screenshot", "client" },
   {{ modkey, "Control" }, "r",          awesome.restart,                                          "reload awesome",                        "awesome"  },
   -- modkey + shift modifier
   {{ modkey, "Shift"   }, "h",          function () awful.tag.incnmaster( 1, nil, true) end,      "increase the number of master clients", "layout"   },

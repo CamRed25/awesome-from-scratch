@@ -11,30 +11,60 @@ local profile = require("dashboard.profile")
 local sliders = require("dashboard.sliders")
 local toggles = require("dashboard.toggles")
 local calendar = require("dashboard.calendar")
+local notifications = require("notifications")
 
 -- Configuration
+-- Two columns, not one tall stack: the four original sections stacked in a
+-- single column added up to ~850px, well past this screen's ~644px usable
+-- height (the calendar's day grid was landing off the bottom of the
+-- display). Side by side, the taller column is ~450px, leaving just enough
+-- headroom for the notification panel below both columns - see its own
+-- panel_height comment in notifications.lua for that budget.
 local config = {
-  width = 440,
+  column_width = 360,
   margin = 20,
   spacing = 16,
   bg = beautiful.bg_normal .. "F2", -- Slightly transparent
   border_width = beautiful.border_width or 1,
   border_color = beautiful.primary_color,
 }
+config.width = config.column_width * 2 + config.spacing + config.margin * 2
 
 --- Create the main dashboard widget
 local function create_dashboard_widget()
   return wibox.widget({
     {
       {
-        -- Profile section (user info + time)
-        profile.create(),
-        -- Sliders section (volume, brightness)
-        sliders.create(),
-        -- Quick toggles section
-        toggles.create(),
-        -- Calendar section
-        calendar.create(),
+        {
+          {
+            {
+              -- Left column: who/when + quick controls
+              profile.create(),
+              sliders.create(),
+              spacing = config.spacing,
+              layout = wibox.layout.fixed.vertical,
+            },
+            width = config.column_width,
+            strategy = "exact",
+            widget = wibox.container.constraint,
+          },
+          {
+            {
+              -- Right column: toggles + calendar
+              toggles.create(),
+              calendar.create(),
+              spacing = config.spacing,
+              layout = wibox.layout.fixed.vertical,
+            },
+            width = config.column_width,
+            strategy = "exact",
+            widget = wibox.container.constraint,
+          },
+          spacing = config.spacing,
+          layout = wibox.layout.fixed.horizontal,
+        },
+        -- Notifications, full width, across the bottom of both columns
+        notifications.create_panel(),
         spacing = config.spacing,
         layout = wibox.layout.fixed.vertical,
       },
@@ -48,15 +78,17 @@ local function create_dashboard_widget()
   })
 end
 
--- Docked top right, under the bar, on whatever screen the popup is on
+-- Centered under the bar (the clock sits dead-center there, see wibar.lua),
+-- on whatever screen the popup is on. Used to be pinned top-right, which put
+-- it under the far edge of the bar regardless of which widget opened it.
+-- workarea.y already excludes the wibar's reserved strut, so it is the top
+-- of the usable area, not the top of the screen - adding wibar_height on
+-- top of it double-counts the bar and floats the panel too low.
 local function place(d)
-  awful.placement.top_right(d, {
-    margins = {
-      top = beautiful.wibar_height + beautiful.useless_gap * 3,
-      right = beautiful.useless_gap * 2,
-    },
-    parent = d.screen,
-  })
+  local wa = d.screen.workarea
+  d.x = wa.x + (wa.width - d.width) / 2
+  d.y = wa.y + beautiful.useless_gap * 2
+  awful.placement.no_offscreen(d, { honor_workarea = true, margins = beautiful.useless_gap * 2 })
 end
 
 -- The modal controller owns visibility, click-outside/tag-change dismissal,

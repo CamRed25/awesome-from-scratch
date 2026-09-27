@@ -43,11 +43,17 @@ local function create_toggle(icon, label, key, on_toggle, check_cmd, signal)
   local active_color = beautiful.primary_color
   local inactive_color = beautiful.bg_focus
 
+  -- Each glyph falls back to a different font (Noto Color Emoji, Symbola,
+  -- Adwaita, or plain JetBrains Mono for the "B" fallback), and those don't
+  -- share a line height - left unconstrained, the label below ends up at a
+  -- different y per toggle depending on which font its icon landed in.
+  -- Forcing the icon row to one height makes every label start flush.
   local icon_widget = wibox.widget({
     text = icon,
     font = beautiful.font_size(20),
     halign = "center",
     valign = "center",
+    forced_height = 28,
     widget = wibox.widget.textbox,
   })
 
@@ -139,7 +145,7 @@ end
 --- Create the toggles section
 function toggles.create()
   -- WiFi toggle
-  local wifi_toggle = create_toggle("󰤨", "WiFi", "wifi", function(state)
+  local wifi_toggle = create_toggle("📶", "WiFi", "wifi", function(state)
     if state then
       awful.spawn("nmcli radio wifi on")
     else
@@ -148,7 +154,9 @@ function toggles.create()
   end, "nmcli radio wifi 2>/dev/null || echo off")
 
   -- Bluetooth toggle
-  local bluetooth_toggle = create_toggle("󰂯", "BT", "bluetooth", function(state)
+  -- No clean Unicode bluetooth glyph exists outside Nerd Font PUA codepoints;
+  -- the "BT" label below the icon already says what this is.
+  local bluetooth_toggle = create_toggle("B", "BT", "bluetooth", function(state)
     if state then
       awful.spawn("bluetoothctl power on")
     else
@@ -159,12 +167,12 @@ function toggles.create()
   -- Do Not Disturb toggle: drives the notification module directly and
   -- follows it when DND is toggled from anywhere else
   toggle_states.dnd = notifications.config.dnd_mode
-  local dnd_toggle = create_toggle("󰂛", "DND", "dnd", function(state)
+  local dnd_toggle = create_toggle("🚫", "DND", "dnd", function(state)
     notifications.set_dnd_mode(state)
   end, nil, "notifications::dnd_changed")
 
   -- Night Light toggle
-  local nightlight_toggle = create_toggle("󰖔", "Night", "nightlight", function(state)
+  local nightlight_toggle = create_toggle("🌙", "Night", "nightlight", function(state)
     if state then
       awful.spawn("gammastep -O 4500")
     else
@@ -173,7 +181,7 @@ function toggles.create()
   end, "pgrep gammastep >/dev/null && echo on || echo off")
 
   -- Airplane mode toggle
-  local airplane_toggle = create_toggle("󰀝", "Airplane", "airplane", function(state)
+  local airplane_toggle = create_toggle("✈", "Airplane", "airplane", function(state)
     if state then
       awful.spawn("nmcli radio all off")
     else
@@ -182,7 +190,7 @@ function toggles.create()
   end, nil)
 
   -- Microphone toggle
-  local mic_toggle = create_toggle("󰍬", "Mic", "mic", function(state)
+  local mic_toggle = create_toggle("🎤", "Mic", "mic", function(state)
     if state then
       awful.spawn("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ 0")
     else

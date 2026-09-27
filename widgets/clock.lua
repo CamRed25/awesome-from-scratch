@@ -46,8 +46,11 @@ local clock_widget = wibox.widget({
   layout = wibox.layout.fixed.horizontal,
 })
 
+-- The notification center used to be its own popup here; it's now the
+-- bottom section of the dashboard (see dashboard/init.lua), so opening it
+-- means opening the dashboard.
 clock_widget:add_button(awful.button({}, 1, function()
-  notifications.toggle_notification_center()
+  require("dashboard").toggle()
 end))
 
 local function set_clock()

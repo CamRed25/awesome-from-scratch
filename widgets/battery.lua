@@ -71,31 +71,13 @@ function M.level_color(percent)
   end
 end
 
---- Nerd-font glyph for a charge level
+--- Glyph for a charge level. Callers already show the exact percentage as
+--- text next to this, so charging/not-charging is all the icon needs to
+--- carry - the 10 separate nerd-font tier glyphs this used to return also
+--- depended on a Nerd Font that isn't installed on this system and rendered
+--- as blank boxes.
 function M.level_icon(percent, charging)
-  if charging then
-    return "󰂄"
-  elseif percent >= 90 then
-    return "󰁹"
-  elseif percent >= 80 then
-    return "󰂂"
-  elseif percent >= 70 then
-    return "󰂁"
-  elseif percent >= 60 then
-    return "󰂀"
-  elseif percent >= 50 then
-    return "󰁿"
-  elseif percent >= 40 then
-    return "󰁾"
-  elseif percent >= 30 then
-    return "󰁽"
-  elseif percent >= 20 then
-    return "󰁼"
-  elseif percent >= 10 then
-    return "󰁻"
-  else
-    return "󰁺"
-  end
+  return charging and "⚡" or "🔋"
 end
 
 -- The wibar widget: recolored SVG icon + percentage, tooltip with the time

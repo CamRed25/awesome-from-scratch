@@ -64,4 +64,8 @@ gears.timer({
   callback = update,
 })
 
+wifi_widget:add_button(awful.button({}, 1, function()
+  require("dashboard").toggle()
+end))
+
 return wifi_widget

@@ -58,7 +58,7 @@ function calendar_widget.create()
   -- Navigation buttons
   local prev_button = wibox.widget({
     {
-      text = "󰅁",
+      text = "◀",
       font = beautiful.font_size(14),
       halign = "center",
       widget = wibox.widget.textbox,
@@ -68,7 +68,7 @@ function calendar_widget.create()
 
   local next_button = wibox.widget({
     {
-      text = "󰅂",
+      text = "▶",
       font = beautiful.font_size(14),
       halign = "center",
       widget = wibox.widget.textbox,

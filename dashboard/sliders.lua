@@ -17,7 +17,8 @@ local slider_config = {
 local refreshers = {}
 
 --- Create a labeled slider widget
--- @tparam string icon The icon character
+-- @tparam string|widget icon A glyph character, or a pre-built widget (e.g.
+--   an imagebox) for cases where no installed font draws the glyph well
 -- @tparam string color The accent color
 -- @tparam string get_cmd Command to read the current system value
 -- @tparam function set_cmd Function that takes a value and returns the set command
@@ -39,14 +40,14 @@ local function create_slider(icon, color, get_cmd, set_cmd, signal)
     widget = wibox.widget.slider,
   })
 
-  local icon_widget = wibox.widget({
+  local icon_widget = type(icon) == "string" and wibox.widget({
     text = icon,
     font = beautiful.font_size(18),
     halign = "center",
     valign = "center",
     forced_width = 28,
     widget = wibox.widget.textbox,
-  })
+  }) or icon
 
   local value_widget = wibox.widget({
     text = "50%",
@@ -67,13 +68,27 @@ local function create_slider(icon, color, get_cmd, set_cmd, signal)
     setting_programmatically = false
   end
 
-  -- Update value display when slider changes; only user drags hit the system
+  -- Update value display when slider changes; only user drags hit the system.
+  -- property::value fires on every pixel of a drag, and each one used to
+  -- spawn a shell (wpctl/brightnessctl) synchronously - a drag across the
+  -- bar could fire dozens of process spawns in under a second, which is
+  -- exactly the kind of stall that reads as "terrible framerate" while
+  -- using this panel. Debounce the actual system write so a drag only
+  -- spawns once, shortly after the value settles; the label still updates
+  -- immediately so the slider feels responsive.
+  local pending_write = nil
   slider:connect_signal("property::value", function()
     local value = math.floor(slider.value)
     value_widget.text = value .. "%"
 
     if set_cmd and not setting_programmatically then
-      awful.spawn.with_shell(set_cmd(value))
+      if pending_write then
+        pending_write:stop()
+      end
+      pending_write = gears.timer.start_new(0.08, function()
+        pending_write = nil
+        awful.spawn.with_shell(set_cmd(value))
+      end)
     end
   end)
 
@@ -115,9 +130,22 @@ end
 
 --- Create the sliders section
 function sliders.create()
-  -- Volume slider
+  -- Volume slider. Every speaker/volume glyph in the Unicode "Miscellaneous
+  -- Symbols" block (U+1F508-1F50A) renders as three flat dots in this
+  -- environment - fontconfig keeps routing them to Symbola instead of Noto
+  -- Color Emoji, unlike every other glyph on this panel. Reusing the SVG the
+  -- top-bar volume widget already draws with sidesteps font fallback
+  -- entirely.
   local volume_slider = create_slider(
-    "󰕾",
+    wibox.widget({
+      image = beautiful.icon("volume-2.svg"),
+      resize = true,
+      halign = "center",
+      valign = "center",
+      forced_width = 28,
+      forced_height = 28,
+      widget = wibox.widget.imagebox,
+    }),
     beautiful.primary_color,
     [[wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk '{print int($2*100)}' || echo 50]],
     function(value)
@@ -129,7 +157,7 @@ function sliders.create()
   -- Brightness slider. No signal: nothing else in the config changes
   -- brightness, and the dashboard re-reads it on every open anyway.
   local brightness_slider = create_slider(
-    "󰃟",
+    "☀",
     beautiful.accent,
     [[brightnessctl -m 2>/dev/null | cut -d',' -f4 | tr -d '%' || echo 50]],
     function(value)

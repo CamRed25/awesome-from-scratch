@@ -14,11 +14,15 @@ local exitscreen = {}
 -- State
 local selected_index = 1
 
+-- Button widgets by index, for set_selected() below.
+local button_widgets = {}
+local set_selected -- assigned below, after create_button
+
 -- Power options
 local options = {
   {
     name = "Lock",
-    icon = "󰌾",
+    icon = "■",
     key = "l",
     command = function()
       awesome.lock()
@@ -26,7 +30,7 @@ local options = {
   },
   {
     name = "Logout",
-    icon = "󰗼",
+    icon = "➜",
     key = "e",
     command = function()
       awesome.quit()
@@ -34,7 +38,7 @@ local options = {
   },
   {
     name = "Suspend",
-    icon = "󰤄",
+    icon = "⏾",
     key = "s",
     command = function()
       awful.spawn("systemctl suspend")
@@ -42,7 +46,7 @@ local options = {
   },
   {
     name = "Reboot",
-    icon = "󰜉",
+    icon = "⏼",
     key = "r",
     command = function()
       awful.spawn("systemctl reboot")
@@ -50,7 +54,7 @@ local options = {
   },
   {
     name = "Shutdown",
-    icon = "󰐥",
+    icon = "⏻",
     key = "p",
     command = function()
       awful.spawn("systemctl poweroff")
@@ -105,6 +109,8 @@ local function create_button(option, index)
     widget = wibox.container.background,
   })
 
+  button_widgets[index] = button
+
   -- Click handler
   button:add_button(awful.button({}, 1, function()
     exitscreen.hide()
@@ -113,18 +119,36 @@ local function create_button(option, index)
 
   -- Hover
   button:connect_signal("mouse::enter", function()
-    if selected_index == index then
-      return
-    end
-    selected_index = index
-    exitscreen.refresh()
+    set_selected(index)
   end)
 
   return button
 end
 
+-- Moves the highlight in place; refresh() rebuilds the whole (fullscreen) popup.
+set_selected = function(new_index)
+  if new_index == selected_index then
+    return
+  end
+
+  local old_button = button_widgets[selected_index]
+  if old_button then
+    old_button.bg = beautiful.bg_focus
+    old_button.fg = beautiful.fg_normal
+  end
+
+  selected_index = new_index
+
+  local new_button = button_widgets[selected_index]
+  if new_button then
+    new_button.bg = beautiful.primary_color
+    new_button.fg = beautiful.bg_normal
+  end
+end
+
 --- Create the exit screen widget
 local function create_exitscreen_widget()
+  button_widgets = {}
   local buttons = {}
   for i, option in ipairs(options) do
     table.insert(buttons, create_button(option, i))
@@ -200,8 +224,7 @@ local controller = modal.new({
     -- key a button displays is the key that triggers it
     for i, option in ipairs(options) do
       if key == option.key then
-        selected_index = i
-        exitscreen.refresh()
+        set_selected(i)
         -- Small delay for visual feedback
         gears.timer.start_new(0.15, function()
           execute_selected()
@@ -214,11 +237,9 @@ local controller = modal.new({
     if key == "Return" then
       execute_selected()
     elseif key == "Left" or key == "h" then
-      selected_index = math.max(1, selected_index - 1)
-      exitscreen.refresh()
+      set_selected(math.max(1, selected_index - 1))
     elseif key == "Right" or key == "l" then
-      selected_index = math.min(#options, selected_index + 1)
-      exitscreen.refresh()
+      set_selected(math.min(#options, selected_index + 1))
     end
   end,
 })

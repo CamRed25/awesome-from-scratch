@@ -32,9 +32,6 @@ return function(s)
   local update_tag = function(widget, tag, index, taglist)
     local w = widget:get_children_by_id("icon_role")[1]
     local indicator = widget:get_children_by_id("indicator")[1]
-    -- Tags carry their icon (set in rc.lua); anything without one gets a
-    -- generic marker instead of crashing the taglist
-    local icon_name = tag.icon_name or "grid.svg"
     local color
 
     if tag.selected then
@@ -51,7 +48,9 @@ return function(s)
       indicator.bg = beautiful.bg_normal
     end
 
-    w.image = beautiful.icon(icon_name, color)
+    w.text = tag.name
+    w.font = beautiful.font_size(9, "Bold")
+    w:set_markup_silently("<span foreground='" .. color .. "'>" .. tag.name .. "</span>")
   end
 
   return awful.widget.taglist({
@@ -69,7 +68,7 @@ return function(s)
       {
         {
           id = "icon_role",
-          widget = wibox.widget.imagebox,
+          widget = wibox.widget.textbox,
         },
         margins = beautiful.widget_icon_margins,
         widget = wibox.container.margin,
